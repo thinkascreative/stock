@@ -1,11 +1,9 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime
 from nsepython import nsefetch
-
-plt.style.use('dark_background')
+import plotly.graph_objects as go
 
 STOCKS = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN",
           "HINDUNILVR", "BHARTIARTL", "AXISBANK", "KOTAKBANK", "WIPRO",
@@ -62,31 +60,25 @@ with tabs[1]:
         buf = st.session_state.price_buf[selected]
         t, p = zip(*buf)
         up = p[-1] >= p[0]
-        color = "#00ff5f" if up else "#ff4c4c"
+        color = "lime" if up else "red"
 
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.set_facecolor("#1e1e1e")
-        ax.grid(True, linestyle="--", alpha=0.3)
-        ax.plot(t, p, color=color, lw=2)
-        ax.fill_between(t, p, color=color, alpha=0.3)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=t, y=p, mode='lines+markers',
+                                 line=dict(color=color, width=2),
+                                 marker=dict(size=6, color='white'),
+                                 name=selected))
 
-        # Dot and price label
-        ax.plot(t[-1], p[-1], 'o', color='white')
-        ax.text(t[-1], p[-1]+0.5, f"₹{p[-1]:.2f}", color='white', fontsize=9,
-                ha='center', bbox=dict(fc="#1e1e1e", ec="white", boxstyle="round,pad=0.2"))
+        fig.add_hline(y=prev_close, line_dash="dash", line_color="white",
+                      annotation_text=f"Prev ₹{prev_close:.2f}", annotation_position="bottom right")
 
-        # Previous close line
-        ax.axhline(y=prev_close, color="white", linestyle="--")
-        ax.annotate(f"Prev ₹{prev_close:.2f}", xy=(t[-1], prev_close), xytext=(10, 0),
-                    textcoords='offset points', color='white', fontsize=9,
-                    bbox=dict(boxstyle="round,pad=0.2", fc="#1e1e1e", ec="white"))
+        fig.update_layout(
+            title=f"{selected} Live ₹{p[-1]:.2f} - {now.strftime('%d %b %Y')}",
+            plot_bgcolor='#1e1e1e', paper_bgcolor='#1e1e1e',
+            font=dict(color='white'), hovermode='x unified',
+            xaxis_title="Time (IST)", yaxis_title="Price (₹)"
+        )
 
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
-        ax.set_xlabel("Time (IST)", color="white")
-        ax.set_ylabel("Price (₹)", color="white")
-        ax.set_title(f"{selected} Live ₹{p[-1]:.2f} - {now.strftime('%d %b %Y')}", color="white")
-        ax.tick_params(colors="white")
-        st.pyplot(fig)
+        st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.error(f"Graph Error: {e}")
 
@@ -113,3 +105,4 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 st.caption("success")
+
