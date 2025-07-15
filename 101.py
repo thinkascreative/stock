@@ -17,7 +17,7 @@ if "price_buf" not in st.session_state:
 st.set_page_config(page_title="📈 Modern Stock Analyzer", layout="wide")
 st.title("📈 Modern Stock Analyzer - NSE")
 
-tabs = st.tabs(["📊 Predictions", "📡 Live Graph", "📅 Daily Performance"])
+tabs = st.tabs(["📊 Predictions", "📡 Live Graph", "🗕️ Daily Performance"])
 
 # ------------------ TAB 1: Predictions ------------------ #
 with tabs[0]:
@@ -26,17 +26,21 @@ with tabs[0]:
     for s in STOCKS:
         try:
             q = nsefetch(f"https://www.nseindia.com/api/quote-equity?symbol={s}")
-            week = q["priceInfo"]["weekHighLow"]
-            low, high = float(week["weekLow"]), float(week["weekHigh"])
-            pct = ((high - low) / low) * 100 if low else 0
-            sig = "✅ Buy" if pct > 2 else ("👀 Watch" if pct > 0 else "❌ Avoid")
-            data.append({"Stock": s, "Weekly %": f"{pct:+.2f}%", "Suggestion": sig})
+            high = float(q["priceInfo"].get("weekHigh", 0))
+            low = float(q["priceInfo"].get("weekLow", 0))
+            if high and low:
+                pct = ((high - low) / low) * 100
+                sig = "✅ Buy" if pct > 2 else ("👀 Watch" if pct > 0 else "❌ Avoid")
+                data.append({"Stock": s, "Weekly %": f"{pct:+.2f}%", "Suggestion": sig})
+            else:
+                data.append({"Stock": s, "Weekly %": "N/A", "Suggestion": "N/A"})
         except Exception as e:
             data.append({"Stock": s, "Weekly %": "Error", "Suggestion": "N/A"})
     df = pd.DataFrame(data)
-    df = df.sort_values(by="Weekly %", ascending=False)
+    df = df[df["Weekly %"] != "Error"]
+    df = df.sort_values(by="Weekly %", ascending=False, key=lambda col: col.str.replace('%','').astype(float), ignore_index=True)
     st.dataframe(df, use_container_width=True)
-    top = ", ".join(df.head(3)["Stock"].tolist())
+    top = ", ".join(df.head(3)["Stock"].tolist()) if not df.empty else "N/A"
     st.markdown(f"🏆 **Top performers**: {top}")
 
 # ------------------ TAB 2: Live Graph ------------------ #
@@ -60,52 +64,31 @@ with tabs[1]:
         buf = st.session_state.price_buf[selected]
         t, p = zip(*buf)
         up = p[-1] >= p[0]
-        line_color = "#00ff5f" if up else "#ff4c4c"
-        area_color = "rgba(0,255,95,0.2)" if up else "rgba(255,76,76,0.2)"
+        color = "lime" if up else "red"
 
         fig = go.Figure()
+        fig.add_trace(go.Scatter(x=t, y=p, mode='lines+markers',
+                                 line=dict(color=color, width=2, shape='spline'),
+                                 marker=dict(size=6, color='white'),
+                                 name=selected))
 
-        fig.add_trace(go.Scatter(
-            x=t, y=p, mode='lines',
-            line=dict(color=line_color, width=2, shape='spline', smoothing=1.3),
-            fill='tozeroy', fillcolor=area_color,
-            name=selected,
-            hoverinfo='x+y'
-        ))
-
-        fig.add_trace(go.Scatter(
-            x=[t[-1]], y=[p[-1]],
-            mode='markers+text',
-            marker=dict(size=8, color='white'),
-            text=[f"₹{p[-1]:.2f}"],
-            textposition='top center',
-            showlegend=False
-        ))
-
-        fig.add_hline(
-            y=prev_close,
-            line_dash="dash", line_color="white",
-            annotation_text=f"Prev ₹{prev_close:.2f}",
-            annotation_position="bottom right"
-        )
+        fig.add_hline(y=prev_close, line_dash="dash", line_color="white",
+                      annotation_text=f"Prev ₹{prev_close:.2f}", annotation_position="bottom right")
 
         fig.update_layout(
             title=f"{selected} Live ₹{p[-1]:.2f} - {now.strftime('%d %b %Y')}",
             plot_bgcolor='#1e1e1e', paper_bgcolor='#1e1e1e',
-            font=dict(color='white'),
-            xaxis_title="Time (IST)",
-            yaxis_title="Price (₹)",
-            hovermode='x unified'
+            font=dict(color='white'), hovermode='x unified',
+            xaxis_title="Time (IST)", yaxis_title="Price (₹)"
         )
 
         st.plotly_chart(fig, use_container_width=True)
-
     except Exception as e:
         st.error(f"Graph Error: {e}")
 
 # ------------------ TAB 3: Daily Performance ------------------ #
 with tabs[2]:
-    st.subheader("📅 Daily Performance")
+    st.subheader("🗕️ Daily Performance")
     rows = []
     for s in STOCKS:
         try:
@@ -126,3 +109,4 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 st.caption("success")
+
