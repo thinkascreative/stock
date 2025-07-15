@@ -60,25 +60,46 @@ with tabs[1]:
         buf = st.session_state.price_buf[selected]
         t, p = zip(*buf)
         up = p[-1] >= p[0]
-        color = "lime" if up else "red"
+        line_color = "#00ff5f" if up else "#ff4c4c"
+        area_color = "rgba(0,255,95,0.2)" if up else "rgba(255,76,76,0.2)"
 
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=t, y=p, mode='lines+markers',
-                                 line=dict(color=color, width=2),
-                                 marker=dict(size=6, color='white'),
-                                 name=selected))
 
-        fig.add_hline(y=prev_close, line_dash="dash", line_color="white",
-                      annotation_text=f"Prev ₹{prev_close:.2f}", annotation_position="bottom right")
+        fig.add_trace(go.Scatter(
+            x=t, y=p, mode='lines',
+            line=dict(color=line_color, width=2, shape='spline', smoothing=1.3),
+            fill='tozeroy', fillcolor=area_color,
+            name=selected,
+            hoverinfo='x+y'
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=[t[-1]], y=[p[-1]],
+            mode='markers+text',
+            marker=dict(size=8, color='white'),
+            text=[f"₹{p[-1]:.2f}"],
+            textposition='top center',
+            showlegend=False
+        ))
+
+        fig.add_hline(
+            y=prev_close,
+            line_dash="dash", line_color="white",
+            annotation_text=f"Prev ₹{prev_close:.2f}",
+            annotation_position="bottom right"
+        )
 
         fig.update_layout(
             title=f"{selected} Live ₹{p[-1]:.2f} - {now.strftime('%d %b %Y')}",
             plot_bgcolor='#1e1e1e', paper_bgcolor='#1e1e1e',
-            font=dict(color='white'), hovermode='x unified',
-            xaxis_title="Time (IST)", yaxis_title="Price (₹)"
+            font=dict(color='white'),
+            xaxis_title="Time (IST)",
+            yaxis_title="Price (₹)",
+            hovermode='x unified'
         )
 
         st.plotly_chart(fig, use_container_width=True)
+
     except Exception as e:
         st.error(f"Graph Error: {e}")
 
@@ -105,4 +126,3 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 st.caption("success")
-
