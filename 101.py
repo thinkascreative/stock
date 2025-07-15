@@ -1,29 +1,42 @@
+# modern_stock_gui.py
+# ----------------------------------------------------------
+# Modern Stock Analyzer – NSE (Streamlit desktop version)
+# Tabs:
+#   1. Weekly Predictions with Buy/Watch/Avoid
+#   2. Manual‑refresh Live Graph (zoom, shaded area, crash detect)
+#   3. Daily Performance snapshot
+# ----------------------------------------------------------
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 from nsepython import nsefetch
 import plotly.graph_objects as go
 
+# ─────────────────────────
+#  USER CONFIGURABLE LIST
+# ─────────────────────────
 STOCKS = [
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "SBIN",
     "HINDUNILVR", "BHARTIARTL", "AXISBANK", "KOTAKBANK", "WIPRO",
     "LT", "ASIANPAINT", "ITC", "MARUTI"
 ]
 
-# ──────────────────────────────────────────────────────────
-# Session‑level price buffer to simulate live graph per run
-# ──────────────────────────────────────────────────────────
+# Session‑level storage for live‑price buffers
 if "price_buf" not in st.session_state:
-    st.session_state.price_buf = {}
+    st.session_state.price_buf = {}   # {symbol: [(timestamp, price), ...]}
 
-# ──────────────────────────────────────────────────────────
-# Page setup
+# ─────────────────────────
+#  PAGE SETUP
+# ─────────────────────────
 st.set_page_config(page_title="📈 Modern Stock Analyzer", layout="wide")
-st.title("📈 Modern Stock Analyzer ­– NSE")
+st.title("📈 Modern Stock Analyzer – NSE")
 
 tabs = st.tabs(["📊 Predictions", "📡 Live Graph", "📅 Daily Performance"])
 
-# ───────────────── TAB 1: Weekly Predictions ───────────────── #
+# ==========================================================
+# TAB 1 : WEEKLY PREDICTIONS
+# ==========================================================
 with tabs[0]:
     st.subheader("Weekly Prediction (High vs Low Range)")
 
@@ -33,16 +46,14 @@ with tabs[0]:
             q = nsefetch(f"https://www.nseindia.com/api/quote-equity?symbol={s}")
             week = q["priceInfo"]["weekHighLow"]
 
-            # New keys are 'min' and 'max'
+            # NSE API now returns min/max
             low  = float(str(week["min"]).replace(",", ""))
             high = float(str(week["max"]).replace(",", ""))
 
             pct = ((high - low) / low) * 100 if low else 0.0
             sig = "✅ Buy" if pct > 2 else ("👀 Watch" if pct > 0 else "❌ Avoid")
 
-            rows.append({"Stock": s,
-                         "Weekly %": f"{pct:+.2f}%",
-                         "Suggestion": sig})
+            rows.append({"Stock": s, "Weekly %": f"{pct:+.2f}%", "Suggestion": sig})
         except Exception:
             rows.append({"Stock": s, "Weekly %": "Error", "Suggestion": "N/A"})
 
@@ -56,57 +67,101 @@ with tabs[0]:
     )
 
     st.dataframe(df, use_container_width=True)
+    top3 = ", ".join(df.head(3)["Stock"].tolist())
+    st.markdown(f"🏆 **Top performers**: {top3}")
 
-    top_three = ", ".join(df.head(3)["Stock"].tolist())
-    st.markdown(f"🏆 **Top performers**: {top_three}")
-
-# ───────────────── TAB 2: Live Graph ───────────────── #
+# ==========================================================
+# TAB 2 : LIVE GRAPH (manual refresh, no blinking)
+# ==========================================================
 with tabs[1]:
     st.subheader("📡 Live Stock Graph")
-    selected = st.selectbox("Select Stock", STOCKS)
 
-    try:
-        q = nsefetch(f"https://www.nseindia.com/api/quote-equity?symbol={selected}")
-        price       = float(q["priceInfo"]["lastPrice"])
-        prev_close  = float(q["priceInfo"]["previousClose"])
-        now         = datetime.now()
+    selected = st.selectbox("Select Stock", STOCKS, key="live_stock_select")
 
-        buf = st.session_state.price_buf.setdefault(selected, [])
-        buf.append((now, price))
-        buf[:] = buf[-300:]                     # keep ~15 min at 3‑s cadence
+    # manual refresh button
+    refresh_clicked = st.button("🔄 Refresh Price", key="refresh_btn")
 
-        times, prices = zip(*buf)
-        uptrend = prices[-1] >= prices[0]
-        color   = "lime" if uptrend else "red"
+    # Only plot when user presses refresh or first time load
+    if refresh_clicked or selected not in st.session_state.price_buf:
+        try:
+            q = nsefetch(f"https://www.nseindia.com/api/quote-equity?symbol={selected}")
+            price      = float(q["priceInfo"]["lastPrice"])
+            prev_close = float(q["priceInfo"]["previousClose"])
+            now        = datetime.now()
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=times, y=prices,
-            mode="lines+markers",
-            line=dict(color=color, width=2),
-            marker=dict(size=6, color="white"),
-            name=selected
-        ))
-        fig.add_hline(
-            y=prev_close,
-            line_dash="dash", line_color="white",
-            annotation_text=f"Prev ₹{prev_close:.2f}",
-            annotation_position="bottom right"
-        )
-        fig.update_layout(
-            title=f"{selected} Live ₹{prices[-1]:.2f} – {now.strftime('%d %b %Y')}",
-            plot_bgcolor="#1e1e1e", paper_bgcolor="#1e1e1e",
-            font=dict(color="white"), hovermode="x unified",
-            xaxis_title="Time (IST)", yaxis_title="Price (₹)"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            # update buffer
+            buf = st.session_state.price_buf.setdefault(selected, [])
+            buf.append((now, price))
+            buf[:] = buf[-300:]          # keep last 300 points (~15 min @ 3 s)
 
-    except Exception as e:
-        st.error(f"Graph Error: {e}")
+            times, prices = zip(*buf)
+            uptrend = prices[-1] >= prices[0]
+            line_color  = "lime" if uptrend else "red"
+            area_color  = "rgba(0,255,0,0.20)" if uptrend else "rgba(255,0,0,0.20)"
+            # crash detection: >3 % drop from max in buffer
+            crash = prices[-1] < max(prices) * 0.97
+            if crash:
+                line_color = "red"
+                area_color = "rgba(255,0,0,0.35)"
 
-# ───────────────── TAB 3: Daily Performance ───────────────── #
+            # Build figure
+            fig = go.Figure()
+
+            fig.add_trace(go.Scatter(
+                x=times,
+                y=prices,
+                mode="lines",
+                line=dict(color=line_color, width=2),
+                fill="tozeroy",
+                fillcolor=area_color,
+                name=selected
+            ))
+
+            # Dot + price label
+            fig.add_trace(go.Scatter(
+                x=[times[-1]],
+                y=[prices[-1]],
+                mode="markers+text",
+                marker=dict(size=8, color="white"),
+                text=[f"₹{prices[-1]:.2f}"],
+                textposition="top center",
+                showlegend=False
+            ))
+
+            # Previous close dashed
+            fig.add_hline(
+                y=prev_close,
+                line_dash="dash",
+                line_color="white",
+                annotation_text=f"Prev ₹{prev_close:.2f}",
+                annotation_position="bottom right"
+            )
+
+            fig.update_layout(
+                title=f"{selected} Live ₹{prices[-1]:.2f} – {now.strftime('%d %b %Y')}",
+                plot_bgcolor="#1e1e1e",
+                paper_bgcolor="#1e1e1e",
+                font=dict(color="white"),
+                hovermode="x unified",
+                dragmode="zoom",
+                xaxis_title="Time (IST)",
+                yaxis_title="Price (₹)"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Graph Error: {e}")
+
+    else:
+        st.info("Hit the 🔄 **Refresh Price** button to load data.")
+
+# ==========================================================
+# TAB 3 : DAILY PERFORMANCE
+# ==========================================================
 with tabs[2]:
     st.subheader("📅 Daily Performance")
+
     perf_rows = []
     for s in STOCKS:
         try:
@@ -118,7 +173,7 @@ with tabs[2]:
             emoji       = "📈" if net > 0 else "📉"
             perf_rows.append({
                 "Stock": s,
-                "Open": f"₹{open_price:.2f}",
+                "Open":  f"₹{open_price:.2f}",
                 "Close": f"₹{close_price:.2f}",
                 "Net P/L": f"{emoji} ₹{net:+.2f}"
             })
@@ -128,5 +183,6 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(perf_rows), use_container_width=True)
 
 st.caption("success")
+
 
 
