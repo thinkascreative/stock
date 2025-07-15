@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.dates as mdates
 from datetime import datetime
 from nsepython import nsefetch
 import plotly.graph_objects as go
