@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.dates as mdates
 from datetime import datetime
 from nsepython import nsefetch
 import plotly.graph_objects as go
@@ -16,7 +17,7 @@ if "price_buf" not in st.session_state:
 st.set_page_config(page_title="📈 Modern Stock Analyzer", layout="wide")
 st.title("📈 Modern Stock Analyzer - NSE")
 
-tabs = st.tabs(["📊 Predictions", "📡 Live Graph", "🗕️ Daily Performance"])
+tabs = st.tabs(["📊 Predictions", "📡 Live Graph", "📅 Daily Performance"])
 
 # ------------------ TAB 1: Predictions ------------------ #
 with tabs[0]:
@@ -25,21 +26,20 @@ with tabs[0]:
     for s in STOCKS:
         try:
             q = nsefetch(f"https://www.nseindia.com/api/quote-equity?symbol={s}")
-            high = float(q["priceInfo"].get("weekHigh", 0))
-            low = float(q["priceInfo"].get("weekLow", 0))
-            if high and low:
-                pct = ((high - low) / low) * 100
-                sig = "✅ Buy" if pct > 2 else ("👀 Watch" if pct > 0 else "❌ Avoid")
-                data.append({"Stock": s, "Weekly %": f"{pct:+.2f}%", "Suggestion": sig})
-            else:
-                data.append({"Stock": s, "Weekly %": "N/A", "Suggestion": "N/A"})
+            week = q["priceInfo"]["weekHighLow"]
+            low, high = float(week["weekLow"]), float(week["weekHigh"])
+            pct = ((high - low) / low) * 100 if low else 0
+            sig = "✅ Buy" if pct > 2 else ("👀 Watch" if pct > 0 else "❌ Avoid")
+            data.append({"Stock": s, "Weekly %": f"{pct:+.2f}%", "Suggestion": sig})
         except Exception as e:
             data.append({"Stock": s, "Weekly %": "Error", "Suggestion": "N/A"})
+
     df = pd.DataFrame(data)
-    df = df[df["Weekly %"] != "Error"]
+    df = df[df["Weekly %"].str.contains("%")]
     df = df.sort_values(by="Weekly %", ascending=False, key=lambda col: col.str.replace('%','').astype(float), ignore_index=True)
+
     st.dataframe(df, use_container_width=True)
-    top = ", ".join(df.head(3)["Stock"].tolist()) if not df.empty else "N/A"
+    top = ", ".join(df.head(3)["Stock"].tolist())
     st.markdown(f"🏆 **Top performers**: {top}")
 
 # ------------------ TAB 2: Live Graph ------------------ #
@@ -67,7 +67,7 @@ with tabs[1]:
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=t, y=p, mode='lines+markers',
-                                 line=dict(color=color, width=2, shape='spline'),
+                                 line=dict(color=color, width=2),
                                  marker=dict(size=6, color='white'),
                                  name=selected))
 
@@ -87,7 +87,7 @@ with tabs[1]:
 
 # ------------------ TAB 3: Daily Performance ------------------ #
 with tabs[2]:
-    st.subheader("🗕️ Daily Performance")
+    st.subheader("📅 Daily Performance")
     rows = []
     for s in STOCKS:
         try:
